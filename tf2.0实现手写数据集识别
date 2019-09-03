@@ -1,0 +1,85 @@
+import tensorflow as tf
+from tensorflow.keras import datasets, layers, optimizers, Sequential
+
+import  os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+#数据加载
+(x, y), (x_test, y_test) = datasets.mnist.load_data()
+print(x.shape, y.shape)
+print(x_test.shape, y_test.shape)
+
+#数据处理
+def preprocess(x, y):
+    '''
+    转换x，y的数据结构，并将x进行归一化，y进行深度为10的onehot编码
+    '''
+    x = tf.cast(x, dtype=tf.float32) / 255. 
+    y = tf.cast(y, dtype=tf.int32)
+    y = tf.one_hot(y, depth=10)
+    return x,y
+
+batchsz = 128 #设置batch数量
+db = tf.data.Dataset.from_tensor_slices((x,y))  #将x，y转换为tensor形式
+db = db.map(preprocess).shuffle(10000).batch(batchsz) #利用map函数对db中的数据进行preprocess函数处理，
+                                                      #并用shuffle将数据打散，并用batch将数据分组
+db_test = tf.data.Dataset.from_tensor_slices((x_test,y_test))
+db_test = db_test.map(preprocess).batch(batchsz)
+
+db_iter = iter(db)
+sample = next(db_iter)
+print('batch:', sample[0].shape, sample[1].shape)
+
+#模型容器
+model = Sequential([ 
+    layers.Dense(256, activation=tf.nn.relu), # [b, 784] => [b, 256]
+    layers.Dense(100, activation=tf.nn.relu), # [b, 256] => [b, 100]
+    layers.Dense(10) # [b, 100] => [b, 10]
+])
+model.build(input_shape=[None, 28*28])  #设置模型输入
+model.summary()  #显示模型  
+
+# w = w - lr*grad
+
+
+optimizer = optimizers.Adam(lr=1e-3) #指定梯度下降的学习率为1e-3的优化器
+def main():
+    for epoch in range(25):  #参数更新30次
+        for step, (x,y) in enumerate(db):  #对训练集进行迭代
+            x = tf.reshape(x, [-1, 28*28])  #将训练集reshape成网络输入的形状
+            with tf.GradientTape() as tape:  
+                y_predict = model(x)  #将数据喂给神经网络模型
+                #loss_mse = tf.reduce_mean(tf.losses.MSE(y, y_predict)) 
+                loss_ce = tf.losses.categorical_crossentropy(y, y_predict, from_logits=True) #计算损失值
+                loss_ce = tf.reduce_mean(loss_ce)  #求所有样本损失值的平均值
+            grads = tape.gradient(loss_ce, model.trainable_variables) #梯度计算
+            optimizer.apply_gradients(zip(grads, model.trainable_variables))  #对所有参数原地更新
+            if step % 100 == 0:
+                print(epoch, step, 'loss:', float(loss_ce))
+                
+        # 测试
+        total_correct = 0
+        total_num = 0
+        for x,y in db_test:
+            x = tf.reshape(x, [-1, 28*28])
+            y_predict = model(x)  
+            prob = tf.nn.softmax(y_predict, axis=1) #对预测结果进行softmax编码，使其分布在【0，1】范围内
+            pred = tf.argmax(prob, axis=1)  #得到概率最大的位置对应的数
+            pred = tf.cast(pred, dtype=tf.int32)  #对结果的数据类型进行转化
+            y = tf.argmax(y,axis=1)
+            y = tf.cast(y,dtype=tf.int32)
+            correct = tf.equal(pred, y)   #对预测值和真实值进行比较
+            correct = tf.reduce_sum(tf.cast(correct, dtype=tf.int32))  #计算迭代一次预测值和真实值相等的次数
+            total_correct += int(correct)  #将每次迭代的相等结果相加
+            total_num += x.shape[0]  #计算出所有的测试集数量
+        acc = total_correct / total_num  #得出正确率
+        print(epoch, 'test acc:', acc)
+
+
+
+
+
+
+
+if __name__ == '__main__':
+    main()
